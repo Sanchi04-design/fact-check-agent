@@ -144,6 +144,14 @@ with st.sidebar:
     except Exception:
         pass
 
+    # B. Tavily Key
+    tavily_from_secrets = False
+    try:
+        if hasattr(st, "secrets") and "TAVILY_API_KEY" in st.secrets and st.secrets["TAVILY_API_KEY"]:
+            tavily_from_secrets = True
+    except Exception:
+        pass
+
     gemini_from_env = bool(os.getenv("GEMINI_API_KEY"))
     tavily_from_env = bool(os.getenv("TAVILY_API_KEY"))
     sidebar_gemini_key = ""
