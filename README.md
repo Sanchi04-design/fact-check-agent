@@ -35,7 +35,7 @@ Marketing and sales collateral frequently contain outdated metrics, hallucinated
 ┌────────────────────────────────────────────────────────┐
 │ Step 1: Claim Extraction (Gemini + pdfplumber)         │
 │ - pdfplumber extracts digital page text                │
-│ - Gemini extracts empirical claims (max 25)            │
+│ - Gemini extracts all checkable empirical claims       │
 │ - Generates {claim, page, quote, search_query}         │
 └──────────┬─────────────────────────────────────────────┘
            │
@@ -190,7 +190,7 @@ See [`answer_key.md`](answer_key.md) for the human-verified ground-truth answers
 ## Design Notes & Limitations
 
 - **No Scanned OCR:** Truth Layer uses `pdfplumber` to extract digital text directly. Image-only or scanned PDFs without text layers are detected and rejected with a friendly message instructing the user to upload a digital PDF.
-- **Claim Cap:** Extraction is capped at 25 claims per document to guarantee fast interactive turnaround and avoid rate limits.
+- **Full Document Extraction:** All checkable empirical claims are extracted without an artificial cap.
 - **Credit Conservation:** Search depth is set to `"basic"` by default, queries are deduplicated with an in-memory cache, and claims are limited to 1 Tavily call per claim.
 - **Session State Persistence:** Results and downloaded CSVs persist in `st.session_state` so interacting with filters or controls does not trigger expensive re-runs.
 - **Worker Concurrency:** Limited to 3 concurrent workers to respect free-tier rate limits for both Gemini and Tavily.

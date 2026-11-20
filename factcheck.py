@@ -350,7 +350,7 @@ RULES:
 2. Include the exact page number (1-indexed) where the claim appears.
 3. Include a short, exact quote from the document supporting the claim.
 4. Provide a "search_query": a short, concise, targeted web search query that would find the authoritative current figure (e.g. "Tesla 2024 annual vehicle deliveries", "Shopify Q3 2024 revenue", "Eiffel Tower official height", NOT the full claim sentence).
-5. Maximum 25 claims.
+5. Extract all checkable empirical claims found in the document without an arbitrary cap.
 6. Return ONLY a valid JSON array of objects with keys: "claim", "page", "quote", "search_query".
 """
 
@@ -361,7 +361,7 @@ def extract_claims(
     max_retries: int = 3
 ) -> List[ExtractedClaim]:
     """
-    Step 1: Extract up to 25 checkable claims and their targeted search queries from PDF text.
+    Step 1: Extract all checkable empirical claims and their targeted search queries from PDF text.
     Uses Gemini without search tools. Retries on transient API errors with exponential backoff.
     """
     prompt = f"{EXTRACTION_SYSTEM_PROMPT}\n\nDOCUMENT TEXT:\n{tagged_pdf_text}\n\nJSON OUTPUT:"
@@ -389,7 +389,7 @@ def extract_claims(
                     raise ValueError(f"Expected JSON array of claims, got {type(parsed_data)}")
 
             claims: List[ExtractedClaim] = []
-            for item in parsed_data[:25]:
+            for item in parsed_data:
                 try:
                     claim_text = str(item.get("claim", "")).strip()
                     query_text = str(item.get("search_query", "")).strip()
