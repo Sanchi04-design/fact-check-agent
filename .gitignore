@@ -1,0 +1,29 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+secrets.toml
+.streamlit/secrets.toml
+
+# Python virtual environment
+.venv/
+venv/
+ENV/
+
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pytest_cache/
+.coverage
+htmlcov/
+
+# Uploaded PDFs and generated artifacts (preserving the benchmark sample_trap.pdf)
+uploads/
+*.pdf
+!sample_trap.pdf
+*.csv
+!tests/*.csv
+
+# Operating system metadata
+.DS_Store
