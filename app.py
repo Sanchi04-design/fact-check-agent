@@ -85,6 +85,10 @@ st.markdown("""
         padding: 10px 14px;
         margin: 10px 0;
         border-radius: 0 6px 6px 0;
+        color: #000000 !important;
+    }
+    .correction-box strong, .correction-box span, .correction-box em, .correction-box div {
+        color: #000000 !important;
     }
     .quote-box {
         background-color: #f8f9fa;
@@ -440,11 +444,13 @@ if results:
 
             # Highlighted correction for Inaccurate / False
             if r.verdict in ("Inaccurate", "False") or (r.real_fact and not r.real_fact.startswith("No reliable")):
-                ref_date_badge = f" <em>(Effective: {r.reference_date})</em>" if r.reference_date else ""
+                ref_date_badge = f" <em style='color: #222222 !important;'>(Effective: {r.reference_date})</em>" if r.reference_date else ""
                 st.markdown(f"""
-                <div class="correction-box">
-                    <strong>🎯 Correct Real Fact{ref_date_badge}:</strong><br>
-                    {r.real_fact or "No reliable correction could be confirmed from the retrieved sources."}
+                <div class="correction-box" style="color: #000000 !important; background-color: #f0f7ff !important;">
+                    <strong style="color: #000000 !important; font-size: 0.95rem;">🎯 Correct Real Fact{ref_date_badge}:</strong><br>
+                    <div style="color: #000000 !important; margin-top: 4px; font-weight: 500; font-size: 1rem; line-height: 1.4;">
+                        {r.real_fact or "No reliable correction could be confirmed from the retrieved sources."}
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
 
