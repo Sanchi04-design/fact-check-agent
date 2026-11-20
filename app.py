@@ -145,86 +145,53 @@ with st.sidebar:
         pass
 
     gemini_from_env = bool(os.getenv("GEMINI_API_KEY"))
-    sidebar_gemini_key = ""
-
-    if gemini_from_secrets:
-        st.success("Gemini Key: Secrets")
-    elif gemini_from_env:
-        st.info("Gemini Key: Environment (.env)")
-    else:
-        sidebar_gemini_key = st.text_input(
-            "Gemini API Key",
-            type="password",
-            placeholder="AIzaSy...",
-            help="Gemini evaluates claims against retrieved search evidence."
-        )
-
-    # B. Tavily Key
-    tavily_from_secrets = False
-    try:
-        if hasattr(st, "secrets") and "TAVILY_API_KEY" in st.secrets and st.secrets["TAVILY_API_KEY"]:
-            tavily_from_secrets = True
-    except Exception:
-        pass
-
     tavily_from_env = bool(os.getenv("TAVILY_API_KEY"))
+    sidebar_gemini_key = ""
     sidebar_tavily_key = ""
 
-    if tavily_from_secrets:
-        st.success("Tavily Key: Secrets")
-    elif tavily_from_env:
-        st.info("Tavily Key: Environment (.env)")
+    # If keys come from secrets (deployed app), hide key fields entirely
+    if gemini_from_secrets and tavily_from_secrets:
+        st.success("API Keys: Configured via Secrets")
     else:
-        sidebar_tavily_key = st.text_input(
-            "Tavily API Key",
-            type="password",
-            placeholder="tvly-...",
-            help="Tavily executes live web search for current authoritative data."
-        )
+        # Gemini Key
+        if gemini_from_secrets:
+            st.success("Gemini Key: Active (Secrets)")
+        elif gemini_from_env:
+            st.info("Gemini Key: Active (.env)")
+        else:
+            sidebar_gemini_key = st.text_input(
+                "Gemini API Key",
+                type="password",
+                placeholder="AIzaSy...",
+                help="Gemini evaluates claims against retrieved search evidence."
+            )
 
-    # Optional manual key override
-    with st.expander("Override API Keys", expanded=False):
-        override_gemini = st.text_input("Custom Gemini Key", type="password")
-        if override_gemini:
-            sidebar_gemini_key = override_gemini
-        override_tavily = st.text_input("Custom Tavily Key", type="password")
-        if override_tavily:
-            sidebar_tavily_key = override_tavily
+        # Tavily Key
+        if tavily_from_secrets:
+            st.success("Tavily Key: Active (Secrets)")
+        elif tavily_from_env:
+            st.info("Tavily Key: Active (.env)")
+        else:
+            sidebar_tavily_key = st.text_input(
+                "Tavily API Key",
+                type="password",
+                placeholder="tvly-...",
+                help="Tavily executes live web search for current authoritative data."
+            )
 
-    # Model selection & custom model option
-    default_model = fc.get_model_name()
-    available_models = [
-        "gemini-3.5-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-3.1-flash-lite",
-        "gemini-3.8-flash",
-        "gemini-3-flash-preview",
-        "gemini-3.1-pro-preview",
-        "Custom Model..."
-    ]
-    if default_model not in available_models and default_model != "Custom Model...":
-        available_models.insert(0, default_model)
+        # Optional manual key override for local development with .env
+        if gemini_from_env or tavily_from_env:
+            with st.expander("Override API Keys", expanded=False):
+                override_gemini = st.text_input("Custom Gemini Key", type="password")
+                if override_gemini:
+                    sidebar_gemini_key = override_gemini
+                override_tavily = st.text_input("Custom Tavily Key", type="password")
+                if override_tavily:
+                    sidebar_tavily_key = override_tavily
 
-    default_index = available_models.index(default_model) if default_model in available_models else 0
-
-    selected_model_option = st.selectbox(
-        "Gemini Model",
-        options=available_models,
-        index=default_index,
-        help="Model used for claim extraction and evidence-first judgment. Switch to a Lite model if you hit free-tier daily quotas."
-    )
-
-    if selected_model_option == "Custom Model...":
-        custom_model_input = st.text_input(
-            "Enter Custom Model ID",
-            placeholder="e.g. gemini-3.5-flash-lite",
-            help="Type any valid Gemini model ID supported by your API key."
-        )
-        model_choice = custom_model_input.strip() if custom_model_input else "gemini-3.5-flash-lite"
-    else:
-        model_choice = selected_model_option
-
-    st.caption("💡 *Tip: If you encounter a 429 daily quota on one model, switch to `gemini-3.5-flash-lite` to use an independent free quota bucket.*")
+    # Model configuration (read-only, fixed to single configured model)
+    model_choice = fc.get_model_name()
+    st.markdown(f"**Model:** `{model_choice}`")
 
     st.markdown("---")
     st.subheader("2. Verdict Taxonomy")

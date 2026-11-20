@@ -95,7 +95,7 @@ Keys are resolved securely without hardcoding:
 2. Environment variables via `.env` (loaded with `python-dotenv`)
 3. Interactive user password inputs in the Streamlit sidebar
 
-The model name is configurable via `GEMINI_MODEL` (default: `gemini-3.5-flash`).
+The model is configured via `GEMINI_MODEL` (default: `gemini-3.5-flash-lite`).
 
 ---
 
@@ -126,7 +126,7 @@ cp .env.example .env
 # Edit .env with your keys:
 # GEMINI_API_KEY="your-gemini-api-key"
 # TAVILY_API_KEY="tvly-your-tavily-api-key"
-# GEMINI_MODEL="gemini-3.5-flash"
+# GEMINI_MODEL="gemini-3.5-flash-lite"
 ```
 
 ### 4. Run the Streamlit Application
@@ -181,7 +181,7 @@ See [`answer_key.md`](answer_key.md) for the human-verified ground-truth answers
      ```toml
      GEMINI_API_KEY = "AIzaSy..."
      TAVILY_API_KEY = "tvly-..."
-     GEMINI_MODEL = "gemini-3.5-flash"
+     GEMINI_MODEL = "gemini-3.5-flash-lite"
      ```
    - Click **"Deploy!"**.
 

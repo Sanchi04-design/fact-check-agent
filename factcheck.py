@@ -175,17 +175,13 @@ def get_tavily_api_key(sidebar_key: Optional[str] = None) -> Optional[str]:
     return None
 
 
-def get_model_name(sidebar_model: Optional[str] = None) -> str:
+def get_model_name() -> str:
     """
     Resolve Gemini model name:
-    1. User sidebar selection / override
-    2. st.secrets["GEMINI_MODEL"]
-    3. GEMINI_MODEL env var
-    4. Default: 'gemini-3.5-flash'
+    1. st.secrets["GEMINI_MODEL"]
+    2. GEMINI_MODEL env var
+    3. Default: 'gemini-3.5-flash-lite'
     """
-    if sidebar_model and sidebar_model.strip():
-        return sidebar_model.strip()
-
     try:
         import streamlit as st
         if hasattr(st, "secrets") and "GEMINI_MODEL" in st.secrets:
@@ -199,7 +195,7 @@ def get_model_name(sidebar_model: Optional[str] = None) -> str:
     if env_model and env_model.strip():
         return env_model.strip()
 
-    return "gemini-3.5-flash"
+    return "gemini-3.5-flash-lite"
 
 
 def get_genai_client(api_key: str) -> genai.Client:
@@ -361,7 +357,7 @@ RULES:
 def extract_claims(
     client: genai.Client,
     tagged_pdf_text: str,
-    model: str = "gemini-3.5-flash",
+    model: str = "gemini-3.5-flash-lite",
     max_retries: int = 3
 ) -> List[ExtractedClaim]:
     """
@@ -574,7 +570,7 @@ def verify_claim_with_evidence(
     genai_client: genai.Client,
     tavily_client: TavilyClient,
     claim_item: ExtractedClaim,
-    model: str = "gemini-3.5-flash",
+    model: str = "gemini-3.5-flash-lite",
     current_date: Optional[str] = None,
     max_retries: int = 3
 ) -> ClaimResult:
@@ -740,7 +736,7 @@ def verify_all_claims(
     genai_client: genai.Client,
     tavily_client: TavilyClient,
     claims: List[ExtractedClaim],
-    model: str = "gemini-3.5-flash",
+    model: str = "gemini-3.5-flash-lite",
     max_workers: int = 3,  # Max 3 concurrent workers (free tier friendly)
     progress_callback: Optional[Callable[[int, int, Optional[ClaimResult]], None]] = None
 ) -> List[ClaimResult]:
