@@ -130,7 +130,7 @@ def get_model_name(sidebar_model: Optional[str] = None) -> str:
     1. User sidebar selection / override
     2. st.secrets["GEMINI_MODEL"]
     3. GEMINI_MODEL env var
-    4. Default: 'gemini-3.8-flash' (or 'gemini-3.5-flash')
+    4. Default: 'gemini-3.5-flash'
     """
     if sidebar_model and sidebar_model.strip():
         return sidebar_model.strip()
@@ -148,7 +148,7 @@ def get_model_name(sidebar_model: Optional[str] = None) -> str:
     if env_model and env_model.strip():
         return env_model.strip()
 
-    return "gemini-3.8-flash"
+    return "gemini-3.5-flash"
 
 
 def get_genai_client(api_key: str) -> genai.Client:
@@ -313,7 +313,7 @@ RULES:
 def extract_claims(
     client: genai.Client,
     tagged_pdf_text: str,
-    model: str = "gemini-3.8-flash",
+    model: str = "gemini-3.5-flash",
     max_retries: int = 3
 ) -> List[ExtractedClaim]:
     """
@@ -436,7 +436,7 @@ def extract_grounding_sources(response: Any) -> List[GroundedSource]:
 def verify_single_claim(
     client: genai.Client,
     claim_item: ExtractedClaim,
-    model: str = "gemini-3.8-flash",
+    model: str = "gemini-3.5-flash",
     current_date: Optional[str] = None,
     max_retries: int = 3
 ) -> ClaimResult:
@@ -554,7 +554,7 @@ def verify_single_claim(
 def verify_all_claims(
     client: genai.Client,
     claims: List[ExtractedClaim],
-    model: str = "gemini-3.8-flash",
+    model: str = "gemini-3.5-flash",
     max_workers: int = 4,
     progress_callback: Optional[Any] = None
 ) -> List[ClaimResult]:

@@ -82,7 +82,7 @@ API keys are resolved securely without hardcoding or committing credentials:
 2. `GEMINI_API_KEY` environment variable (loaded from `.env` via `python-dotenv`)
 3. Interactive user password input in the Streamlit sidebar
 
-The model name is configurable via `GEMINI_MODEL` (default: `gemini-3.8-flash` / `gemini-3.5-flash`).
+The model name is configurable via `GEMINI_MODEL` (default: `gemini-3.5-flash`).
 
 ---
 
@@ -110,7 +110,7 @@ pip install -r dev-requirements.txt
 Create a `.env` file in the project root (or `.streamlit/secrets.toml`):
 ```bash
 echo "GEMINI_API_KEY=your_gemini_api_key_here" >> .env
-echo "GEMINI_MODEL=gemini-3.8-flash" >> .env
+echo "GEMINI_MODEL=gemini-3.5-flash" >> .env
 ```
 
 ### 4. Run the Streamlit Application
@@ -169,7 +169,7 @@ Running `python run_live_eval.py` on `sample_trap.pdf`:
    - Paste your configuration:
      ```toml
      GEMINI_API_KEY = "AIzaSy..."
-     GEMINI_MODEL = "gemini-3.8-flash"
+     GEMINI_MODEL = "gemini-3.5-flash"
      ```
    - Click **"Deploy!"**.
 

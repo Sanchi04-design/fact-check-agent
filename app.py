@@ -155,7 +155,7 @@ with st.sidebar:
 
     # Model selection
     default_model = fc.get_model_name()
-    available_models = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-3.1-pro-preview"]
+    available_models = ["gemini-3.5-flash", "gemini-3.8-flash", "gemini-2.5-flash", "gemini-3.1-pro-preview"]
     if default_model not in available_models:
         available_models.insert(0, default_model)
 
