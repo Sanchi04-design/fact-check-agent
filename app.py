@@ -191,18 +191,40 @@ with st.sidebar:
         if override_tavily:
             sidebar_tavily_key = override_tavily
 
-    # Model selection
+    # Model selection & custom model option
     default_model = fc.get_model_name()
-    available_models = ["gemini-3.5-flash", "gemini-3.8-flash", "gemini-3.1-pro-preview"]
-    if default_model not in available_models:
+    available_models = [
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-3.8-flash",
+        "gemini-3-flash-preview",
+        "gemini-3.1-pro-preview",
+        "Custom Model..."
+    ]
+    if default_model not in available_models and default_model != "Custom Model...":
         available_models.insert(0, default_model)
 
-    model_choice = st.selectbox(
+    default_index = available_models.index(default_model) if default_model in available_models else 0
+
+    selected_model_option = st.selectbox(
         "Gemini Model",
         options=available_models,
-        index=available_models.index(default_model) if default_model in available_models else 0,
-        help="Model used for claim extraction and evidence-first judgment."
+        index=default_index,
+        help="Model used for claim extraction and evidence-first judgment. Switch to a Lite model if you hit free-tier daily quotas."
     )
+
+    if selected_model_option == "Custom Model...":
+        custom_model_input = st.text_input(
+            "Enter Custom Model ID",
+            placeholder="e.g. gemini-3.5-flash-lite",
+            help="Type any valid Gemini model ID supported by your API key."
+        )
+        model_choice = custom_model_input.strip() if custom_model_input else "gemini-3.5-flash-lite"
+    else:
+        model_choice = selected_model_option
+
+    st.caption("💡 *Tip: If you encounter a 429 daily quota on one model, switch to `gemini-3.5-flash-lite` to use an independent free quota bucket.*")
 
     st.markdown("---")
     st.subheader("2. Verdict Taxonomy")
