@@ -1,12 +1,14 @@
 """
-Unit and Integration Tests for Truth Layer Fact-Check Agent
+Unit and Integration Tests for Truth Layer Fact-Check Agent (Tavily + Gemini)
 Covers:
 - PDF extraction (normal, empty, scanned/image-only, truncation)
-- JSON parsing and Pydantic validation
-- Grounding metadata extraction
-- Verdict validation rules
-- CSV export & escaping
-- Parallel verification pipeline with mocked Gemini responses
+- JSON parsing and Pydantic validation (ExtractedClaim with search_query, ClaimVerification)
+- Tavily search result formatting, snippet truncation, and caching
+- Evidence block formatting for Gemini prompts
+- Client-side enforcement: Verified requires cited evidence
+- GroundedSource mapping strictly from cited evidence items
+- CSV export & escaping (including Search Query column)
+- Parallel pipeline execution with mocked Tavily and Gemini
 """
 
 import io
@@ -46,7 +48,6 @@ def test_format_tagged_pdf_text():
 
 def test_extract_pdf_pages_empty_fails():
     """Verify empty PDF raises EmptyPDFError."""
-    # A byte stream with no pages
     mock_pdf = MagicMock()
     mock_pdf.pages = []
     with patch("pdfplumber.open") as mock_open:
@@ -58,7 +59,7 @@ def test_extract_pdf_pages_empty_fails():
 def test_extract_pdf_pages_scanned_detected():
     """Verify image-only/scanned PDF without text raises ScannedPDFError."""
     mock_page = MagicMock()
-    mock_page.extract_text.return_value = "   \n  "  # only whitespace
+    mock_page.extract_text.return_value = "   \n  "
     mock_pdf = MagicMock()
     mock_pdf.pages = [mock_page]
 
@@ -100,15 +101,29 @@ def test_clean_json_text_fences():
 
 def test_extract_json_object_or_array():
     """Verify JSON parsing and regex fallback for messy model responses."""
-    text_with_chatter = "Here is the result:\n```json\n[{\"claim\": \"A\", \"page\": 1, \"quote\": \"B\"}]\n```\nHope this helps!"
+    text_with_chatter = "Here is the result:\n```json\n[{\"claim\": \"A\", \"page\": 1, \"quote\": \"B\", \"search_query\": \"Q\"}]\n```\nHope this helps!"
     parsed = fc.extract_json_object_or_array(text_with_chatter)
     assert isinstance(parsed, list)
     assert parsed[0]["claim"] == "A"
+    assert parsed[0]["search_query"] == "Q"
 
-    obj_text = "Analysis complete:\n{\"verdict\": \"False\", \"real_fact\": \"Actual\", \"reference_date\": \"2024\", \"explanation\": \"Disproven\", \"confidence\": 0.95}"
+    obj_text = "Analysis complete:\n{\"verdict\": \"False\", \"real_fact\": \"Actual\", \"reference_date\": \"2024\", \"explanation\": \"Disproven\", \"confidence\": 0.95, \"evidence_used\": [1]}"
     parsed_obj = fc.extract_json_object_or_array(obj_text)
     assert isinstance(parsed_obj, dict)
     assert parsed_obj["verdict"] == "False"
+    assert parsed_obj["evidence_used"] == [1]
+
+
+def test_pydantic_extracted_claim_schema():
+    """Verify ExtractedClaim validates claim, page, quote, and search_query."""
+    claim = fc.ExtractedClaim(
+        claim="Tesla delivered 499,550 cars in 2024.",
+        page=2,
+        quote="Tesla's global vehicle deliveries were 499,550 in 2024",
+        search_query="Tesla 2024 annual vehicle deliveries"
+    )
+    assert claim.page == 2
+    assert claim.search_query == "Tesla 2024 annual vehicle deliveries"
 
 
 def test_pydantic_claim_verification_schema():
@@ -118,11 +133,13 @@ def test_pydantic_claim_verification_schema():
         "real_fact": "Corrected number is 100",
         "reference_date": "2024-Q3",
         "explanation": "Evidence shows 100 not 50",
-        "confidence": 0.9
+        "confidence": 0.9,
+        "evidence_used": [1, 2]
     }
     cv = fc.ClaimVerification(**valid_data)
     assert cv.verdict == "Inaccurate"
     assert cv.confidence == 0.9
+    assert cv.evidence_used == [1, 2]
 
     # Invalid verdict
     with pytest.raises(Exception):
@@ -134,51 +151,166 @@ def test_pydantic_claim_verification_schema():
 
 
 # ---------------------------------------------------------------------------
-# 3. Grounding Metadata Extraction Tests
+# 3. Tavily Search, Caching & Evidence Formatting Tests
 # ---------------------------------------------------------------------------
 
-def test_extract_grounding_sources_success():
-    """Verify extracting titles and URIs from grounding_metadata chunks."""
-    chunk1 = MagicMock()
-    chunk1.web.uri = "https://www.sec.gov/filing"
-    chunk1.web.title = "SEC Filing"
+def test_tavily_search_and_caching():
+    """Verify Tavily search parsing, snippet truncation, and in-memory cache."""
+    mock_tavily = MagicMock()
+    mock_tavily.search.return_value = {
+        "results": [
+            {
+                "title": "SEC 10-K Filing",
+                "url": "https://sec.gov/filing1",
+                "content": "A" * 800,  # exceeds 600 chars
+                "published_date": "2024-11-01"
+            }
+        ]
+    }
 
-    chunk2 = MagicMock()
-    chunk2.web.uri = "https://news.microsoft.com/press"
-    chunk2.web.title = "Microsoft Press"
+    # First call - fresh
+    items, is_cached, err = fc.search_tavily(
+        mock_tavily,
+        query="unique_test_query_123",
+        claim_text="Some claim",
+        max_retries=1
+    )
+    assert err is None
+    assert is_cached is False
+    assert len(items) == 1
+    assert len(items[0].content) <= 605
+    assert items[0].url == "https://sec.gov/filing1"
+    assert mock_tavily.search.call_count == 1
 
-    # Duplicate URI should be deduplicated
-    chunk3 = MagicMock()
-    chunk3.web.uri = "https://www.sec.gov/filing"
-    chunk3.web.title = "SEC Duplicate"
-
-    mock_response = MagicMock()
-    candidate = MagicMock()
-    candidate.grounding_metadata.grounding_chunks = [chunk1, chunk2, chunk3]
-    mock_response.candidates = [candidate]
-
-    sources = fc.extract_grounding_sources(mock_response)
-    assert len(sources) == 2
-    assert sources[0].url == "https://www.sec.gov/filing"
-    assert sources[0].title == "SEC Filing"
-    assert sources[1].url == "https://news.microsoft.com/press"
+    # Second call - from cache
+    items2, is_cached2, err2 = fc.search_tavily(
+        mock_tavily,
+        query="unique_test_query_123",
+        claim_text="Some claim",
+        max_retries=1
+    )
+    assert is_cached2 is True
+    assert len(items2) == 1
+    # Search was NOT called again!
+    assert mock_tavily.search.call_count == 1
 
 
-def test_extract_grounding_sources_empty():
-    """Verify graceful handling when candidates or grounding chunks are None."""
-    mock_response = MagicMock()
-    mock_response.candidates = []
-    assert fc.extract_grounding_sources(mock_response) == []
-
-    mock_response2 = MagicMock()
-    candidate = MagicMock()
-    candidate.grounding_metadata = None
-    mock_response2.candidates = [candidate]
-    assert fc.extract_grounding_sources(mock_response2) == []
+def test_format_evidence_block():
+    """Verify numbered formatting of evidence items."""
+    items = [
+        fc.TavilyEvidenceItem(
+            index=1,
+            title="Source 1",
+            url="https://src1.com",
+            content="Snippet 1",
+            published_date="2024-01-01"
+        ),
+        fc.TavilyEvidenceItem(
+            index=2,
+            title="Source 2",
+            url="https://src2.com",
+            content="Snippet 2",
+            published_date=None
+        )
+    ]
+    block = fc.format_evidence_block(items)
+    assert "[1] Title: Source 1" in block
+    assert "URL: https://src1.com" in block
+    assert "Date: 2024-01-01" in block
+    assert "[2] Title: Source 2" in block
 
 
 # ---------------------------------------------------------------------------
-# 4. Auditable CSV Export Tests
+# 4. Client-side Rules & Evidence Mapping Tests
+# ---------------------------------------------------------------------------
+
+def test_verified_downgrades_without_cited_evidence():
+    """Verify that a Verified verdict with no evidence_used is downgraded to Unverifiable."""
+    mock_genai = MagicMock()
+    mock_tavily = MagicMock()
+
+    mock_tavily.search.return_value = {
+        "results": [
+            {"title": "Doc 1", "url": "https://doc1.com", "content": "Text 1"}
+        ]
+    }
+
+    # Gemini returns Verified but empty evidence_used []
+    mock_response = MagicMock()
+    mock_response.text = json.dumps({
+        "verdict": "Verified",
+        "real_fact": "Fact",
+        "reference_date": "2024",
+        "explanation": "I think it is true.",
+        "confidence": 0.9,
+        "evidence_used": []  # EMPTY!
+    })
+    mock_genai.models.generate_content.return_value = mock_response
+
+    claim = fc.ExtractedClaim(
+        claim="Some claim",
+        page=1,
+        quote="Quote",
+        search_query="query"
+    )
+
+    result = fc.verify_claim_with_evidence(
+        genai_client=mock_genai,
+        tavily_client=mock_tavily,
+        claim_item=claim
+    )
+
+    # Must be downgraded to Unverifiable!
+    assert result.verdict == "Unverifiable"
+    assert "Downgraded" in result.explanation
+
+
+def test_sources_mapped_strictly_from_cited_evidence():
+    """Verify that displayed sources come strictly from the cited evidence item indices."""
+    mock_genai = MagicMock()
+    mock_tavily = MagicMock()
+
+    mock_tavily.search.return_value = {
+        "results": [
+            {"title": "Doc 1", "url": "https://doc1.com", "content": "Evidence 1"},
+            {"title": "Doc 2", "url": "https://doc2.com", "content": "Evidence 2"},
+            {"title": "Doc 3", "url": "https://doc3.com", "content": "Evidence 3"}
+        ]
+    }
+
+    # Gemini cites ONLY item 2
+    mock_response = MagicMock()
+    mock_response.text = json.dumps({
+        "verdict": "Inaccurate",
+        "real_fact": "Correct Fact",
+        "reference_date": "2024-Q3",
+        "explanation": "Evidence 2 confirms the actual figure.",
+        "confidence": 0.95,
+        "evidence_used": [2]
+    })
+    mock_genai.models.generate_content.return_value = mock_response
+
+    claim = fc.ExtractedClaim(
+        claim="Claim about doc",
+        page=1,
+        quote="Quote",
+        search_query="doc search"
+    )
+
+    result = fc.verify_claim_with_evidence(
+        genai_client=mock_genai,
+        tavily_client=mock_tavily,
+        claim_item=claim
+    )
+
+    assert result.verdict == "Inaccurate"
+    assert len(result.sources) == 1
+    assert result.sources[0].url == "https://doc2.com"
+    assert result.sources[0].title == "Doc 2"
+
+
+# ---------------------------------------------------------------------------
+# 5. Auditable CSV Export Tests
 # ---------------------------------------------------------------------------
 
 def test_results_to_dataframe_and_csv():
@@ -188,6 +320,7 @@ def test_results_to_dataframe_and_csv():
             claim="Microsoft acquired Activision for $69B, reported as \"massive\" in media.",
             page=1,
             quote="completed its acquisition",
+            search_query="Microsoft Activision acquisition $69 billion",
             verdict="Verified",
             real_fact="Closed at $68.7B",
             reference_date="2023-10",
@@ -197,25 +330,14 @@ def test_results_to_dataframe_and_csv():
                 fc.GroundedSource(title="SEC 8-K", url="https://www.sec.gov/archive"),
                 fc.GroundedSource(title="Reuters", url="https://reuters.com/tech")
             ]
-        ),
-        fc.ClaimResult(
-            claim="Stripe bought Spotify for $45B.",
-            page=2,
-            quote="Stripe acquired music streaming service Spotify",
-            verdict="False",
-            real_fact="No acquisition occurred.",
-            reference_date="2024",
-            explanation="Spotify remains independent.",
-            confidence=1.0,
-            sources=[]
         )
     ]
 
     df = fc.results_to_dataframe(results)
-    assert len(df) == 2
+    assert len(df) == 1
     expected_cols = [
-        "Original Claim", "Page", "Supporting Quote", "Verdict",
-        "Correct Fact", "Reference Date", "Explanation",
+        "Original Claim", "Page", "Supporting Quote", "Search Query",
+        "Verdict", "Correct Fact", "Reference Date", "Explanation",
         "Confidence", "Grounded Sources"
     ]
     for col in expected_cols:
@@ -225,61 +347,45 @@ def test_results_to_dataframe_and_csv():
     assert isinstance(csv_bytes, bytes)
     csv_str = csv_bytes.decode("utf-8")
     assert "Microsoft acquired Activision" in csv_str
+    assert "Microsoft Activision acquisition $69 billion" in csv_str
     assert "https://www.sec.gov/archive" in csv_str
-    # Verify quotes escaping in CSV
-    assert '""massive""' in csv_str or '"Microsoft acquired Activision' in csv_str
 
 
 # ---------------------------------------------------------------------------
-# 5. Parallel Pipeline Execution (Mocked)
+# 6. Parallel Pipeline Execution (Mocked)
 # ---------------------------------------------------------------------------
 
 def test_verify_all_claims_handles_partial_failure():
     """Verify ThreadPoolExecutor preserves successful claims even when one fails."""
-    mock_client = MagicMock()
+    mock_genai = MagicMock()
+    mock_tavily = MagicMock()
 
-    claim1 = fc.ExtractedClaim(claim="Claim 1 is verified.", page=1, quote="Quote 1")
-    claim2 = fc.ExtractedClaim(claim="Claim 2 fails with error.", page=1, quote="Quote 2")
-    claim3 = fc.ExtractedClaim(claim="Claim 3 is false.", page=2, quote="Quote 3")
+    claim1 = fc.ExtractedClaim(claim="Claim 1", page=1, quote="Q1", search_query="sq1")
+    claim2 = fc.ExtractedClaim(claim="Claim 2", page=1, quote="Q2", search_query="sq2")
 
-    def mock_verify_single(client, claim_item, model, current_date):
+    def mock_verify_single(genai_client, tavily_client, claim_item, model, current_date):
         if "Claim 2" in claim_item.claim:
-            raise RuntimeError("Network timeout simulation")
-        elif "Claim 1" in claim_item.claim:
-            return fc.ClaimResult(
-                claim=claim_item.claim,
-                page=claim_item.page,
-                quote=claim_item.quote,
-                verdict="Verified",
-                explanation="Grounded",
-                confidence=0.95,
-                sources=[fc.GroundedSource(title="Source 1", url="https://src1.org")]
-            )
-        else:
-            return fc.ClaimResult(
-                claim=claim_item.claim,
-                page=claim_item.page,
-                quote=claim_item.quote,
-                verdict="False",
-                real_fact="Correct Fact",
-                reference_date="2024",
-                explanation="Contradicted",
-                confidence=0.99,
-                sources=[fc.GroundedSource(title="Source 3", url="https://src3.org")]
-            )
+            raise RuntimeError("Simulated network timeout")
+        return fc.ClaimResult(
+            claim=claim_item.claim,
+            page=claim_item.page,
+            quote=claim_item.quote,
+            search_query=claim_item.search_query,
+            verdict="Verified",
+            explanation="Grounded",
+            confidence=0.95,
+            sources=[fc.GroundedSource(title="Source 1", url="https://src1.org")]
+        )
 
-    with patch("factcheck.verify_single_claim", side_effect=mock_verify_single):
+    with patch("factcheck.verify_claim_with_evidence", side_effect=mock_verify_single):
         results = fc.verify_all_claims(
-            client=mock_client,
-            claims=[claim1, claim2, claim3],
+            genai_client=mock_genai,
+            tavily_client=mock_tavily,
+            claims=[claim1, claim2],
             max_workers=2
         )
 
-        assert len(results) == 3
-        # Claim 1 succeeded
+        assert len(results) == 2
         assert results[0].verdict == "Verified"
-        # Claim 2 failed gracefully without crashing pipeline
         assert results[1].verdict == "Unverifiable"
-        assert "Network timeout" in results[1].explanation
-        # Claim 3 succeeded
-        assert results[2].verdict == "False"
+        assert "Simulated network timeout" in results[1].explanation

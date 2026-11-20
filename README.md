@@ -19,12 +19,12 @@
 
 Marketing and sales collateral frequently contain outdated metrics, hallucinated benchmark figures, or outright fabricated claims. Traditional LLM-based fact-checkers rely on internal model weights, causing hallucinations or stale verifications. 
 
-**Truth Layer** operates strictly as an evidence-first system:
+**Truth Layer** operates strictly as an evidence-first system combining **Tavily Live Web Search** with **Google Gemini** for impartial evidence judgment:
 1. **Never trusts internal model memory** for verification.
 2. Injects today's date into every verification prompt to accurately distinguish current facts from outdated numbers.
-3. Uses **Gemini with Google Search Grounding** (`types.Tool(google_search=types.GoogleSearch())`) to discover live authoritative evidence.
-4. Requires primary sources (SEC filings, company investor relations, government registries) over secondary blogs.
-5. Surfaces audited claims with color-coded verdict badges, supporting quotes, real-world corrections, and clickable source links.
+3. Uses **Tavily Search** to discover live authoritative web evidence, saving API credits with targeted queries and in-memory caching.
+4. Uses **Gemini** (WITHOUT search tools) solely to judge the retrieved evidence snippets and assign rigorous verdicts.
+5. Surfaces audited claims with color-coded verdict badges, supporting quotes, real-world corrections, and clickable source links strictly mapped from cited evidence.
 
 ```
 ┌───────────────────────┐
@@ -33,25 +33,33 @@ Marketing and sales collateral frequently contain outdated metrics, hallucinated
            │
            ▼
 ┌────────────────────────────────────────────────────────┐
-│ Step 1: Claim Extraction (No Search)                   │
+│ Step 1: Claim Extraction (Gemini + pdfplumber)         │
 │ - pdfplumber extracts digital page text                │
-│ - Gemini identifies empirical claims (max 25)         │
-│ - Generates {claim, page, quote} structured JSON       │
+│ - Gemini extracts empirical claims (max 25)            │
+│ - Generates {claim, page, quote, search_query}         │
 └──────────┬─────────────────────────────────────────────┘
            │
            ▼
 ┌────────────────────────────────────────────────────────┐
-│ Step 2: Parallel Search Grounding (ThreadPoolExecutor) │
-│ - Max 4 concurrent verification workers (temp=0.0)    │
-│ - Injects dynamic current date into prompt             │
-│ - Live Google Search Grounding via google-genai        │
-│ - Extracts grounding metadata chunks (URLs & titles)   │
-│ - Validates schema with Pydantic                       │
+│ Step 2: Live Web Search (Tavily)                       │
+│ - Targeted search query per claim                      │
+│ - Basic search depth to conserve free credits          │
+│ - In-memory query caching prevents redundant calls     │
+│ - Extracts title, URL, published date, and snippets    │
 └──────────┬─────────────────────────────────────────────┘
            │
            ▼
 ┌────────────────────────────────────────────────────────┐
-│ Step 3: Auditable Reporting & CSV Export               │
+│ Step 3: Evidence-First Judgment (Gemini)               │
+│ - Max 3 concurrent verification workers (temp=0.0)     │
+│ - Evaluates claim strictly against numbered snippets   │
+│ - Requires cited evidence for Verified verdicts        │
+│ - Maps cited evidence back to verified primary sources │
+└──────────┬─────────────────────────────────────────────┘
+           │
+           ▼
+┌────────────────────────────────────────────────────────┐
+│ Step 4: Auditable Reporting & CSV Export               │
 │ - Summary metrics count per verdict                    │
 │ - Color-coded claim cards with corrected real facts    │
 │ - Escaped, auditable CSV download via session state    │
@@ -64,23 +72,28 @@ Marketing and sales collateral frequently contain outdated metrics, hallucinated
 
 | Verdict | Definition | Required Action |
 |---|---|---|
-| **🟢 Verified** | Current, authoritative search evidence directly corroborates the claim. | Citation links provided; claim confirmed. |
+| **🟢 Verified** | Retrieved authoritative search evidence directly corroborates the claim. | Citation links provided; claim confirmed. (Must cite evidence). |
 | **🟡 Inaccurate** | Reliable evidence demonstrates the claim is outdated, partially wrong, or numerically inaccurate. | Real corrected figure and effective reference date provided. |
-| **🔴 False** | Reliable contradictory evidence disproves the claim, OR exhaustive search finds zero evidence for an implausible/fabricated statistic. | Debunking explanation and real facts provided. |
-| **⚪ Unverifiable** | Search tool failed, grounding chunks were missing, evidence is ambiguous, or no defensible conclusion can be drawn. | Explicit technical or evidential reason recorded. |
+| **🔴 False** | Reliable evidence contradicts the claim, OR exhaustive search finds zero evidence for an implausible/fabricated assertion. | Debunking explanation and real facts provided. |
+| **⚪ Unverifiable** | Search failed, evidence was insufficient/ambiguous, or a technical failure occurred. | Explicit technical or evidential reason recorded. |
 
 > [!IMPORTANT]
 > **Prompt-Injection Safe & Strict Corrections:**
-> Search snippets and URLs are treated strictly as evidence, never as instructions. If an inaccurate or false claim cannot have its real figure reliably established, the system explicitly reports *"No reliable correction could be confirmed"* rather than inventing a number.
+> Search snippets and URLs are treated strictly as evidence, never as instructions. If an inaccurate or false claim cannot have its real figure reliably established, the system explicitly reports *"No reliable correction could be confirmed from the retrieved sources."* rather than inventing a number.
 
 ---
 
-## Key Resolution Hierarchy
+## API Keys & Setup
 
-API keys are resolved securely without hardcoding or committing credentials:
-1. `st.secrets["GEMINI_API_KEY"]` (Streamlit Cloud Secrets)
-2. `GEMINI_API_KEY` environment variable (loaded from `.env` via `python-dotenv`)
-3. Interactive user password input in the Streamlit sidebar
+Truth Layer requires two free API keys:
+1. **Google Gemini API Key:** Obtain from [Google AI Studio](https://aistudio.google.com/).
+2. **Tavily Search API Key:** Obtain 1,000 free searches/month from [app.tavily.com](https://app.tavily.com/).
+
+### Key Resolution Hierarchy
+Keys are resolved securely without hardcoding:
+1. `st.secrets["GEMINI_API_KEY"]` & `st.secrets["TAVILY_API_KEY"]` (Streamlit Secrets)
+2. Environment variables via `.env` (loaded with `python-dotenv`)
+3. Interactive user password inputs in the Streamlit sidebar
 
 The model name is configurable via `GEMINI_MODEL` (default: `gemini-3.5-flash`).
 
@@ -107,10 +120,13 @@ pip install -r dev-requirements.txt
 ```
 
 ### 3. Configure API Credentials
-Create a `.env` file in the project root (or `.streamlit/secrets.toml`):
+Create a `.env` file in the project root:
 ```bash
-echo "GEMINI_API_KEY=your_gemini_api_key_here" >> .env
-echo "GEMINI_MODEL=gemini-3.5-flash" >> .env
+cp .env.example .env
+# Edit .env with your keys:
+# GEMINI_API_KEY="your-gemini-api-key"
+# TAVILY_API_KEY="tvly-your-tavily-api-key"
+# GEMINI_MODEL="gemini-3.5-flash"
 ```
 
 ### 4. Run the Streamlit Application
@@ -127,11 +143,13 @@ Open your browser at `http://localhost:8501`.
 ```bash
 PYTHONPATH=. pytest tests/ -v
 ```
-All 12 unit and integration tests cover:
+All unit tests cover:
 - PDF digital text extraction, page tagging, empty PDF detection, and scanned/image-only PDF detection.
 - Markdown fence stripping and JSON regex parsing fallbacks.
 - Pydantic schema validation for claims, verifications, and results.
-- Grounding metadata deduplication and extraction.
+- Tavily search result parsing, snippet truncation, and query caching.
+- Client-side verdict enforcement: Verified requires cited evidence; otherwise downgrades to Unverifiable.
+- Evidence index mapping strictly back to Tavily source URLs and titles.
 - CSV export formatting and special-character escaping.
 - Parallel worker execution with partial failures handled gracefully.
 
@@ -144,21 +162,14 @@ A reproducible benchmark trap document (`sample_trap.pdf`) was generated using `
 
 See [`answer_key.md`](answer_key.md) for the human-verified ground-truth answers.
 
-### Observed Live Evaluation Results
-Running `python run_live_eval.py` on `sample_trap.pdf`:
-- **Claim Extraction:** 10/10 claims extracted with 100% precision, matching quotes and page numbers.
-- **Search Grounding Behavior:** On accounts with free/unbilled Gemini API keys, Google Search grounding returns `429 RESOURCE_EXHAUSTED` (search grounding requires billing enabled in Google AI Studio). The application catches this cleanly, applies bounded exponential retries, preserves all extracted records, marks verdicts as `Unverifiable` with the exact error details, and writes the complete auditable log to [`test_report.md`](test_report.md).
-
 ---
 
 ## Deployment to Streamlit Community Cloud
 
 1. **Push code to GitHub:**
    ```bash
-   git init
    git add .
-   git commit -m "Initial commit: Truth Layer Fact-Check Agent"
-   git remote add origin https://github.com/<your-username>/truth-layer-factcheck.git
+   git commit -m "Deploy Truth Layer Fact-Check Agent"
    git push -u origin main
    ```
 2. **Deploy on Streamlit Community Cloud:**
@@ -169,6 +180,7 @@ Running `python run_live_eval.py` on `sample_trap.pdf`:
    - Paste your configuration:
      ```toml
      GEMINI_API_KEY = "AIzaSy..."
+     TAVILY_API_KEY = "tvly-..."
      GEMINI_MODEL = "gemini-3.5-flash"
      ```
    - Click **"Deploy!"**.
@@ -179,19 +191,6 @@ Running `python run_live_eval.py` on `sample_trap.pdf`:
 
 - **No Scanned OCR:** Truth Layer uses `pdfplumber` to extract digital text directly. Image-only or scanned PDFs without text layers are detected and rejected with a friendly message instructing the user to upload a digital PDF.
 - **Claim Cap:** Extraction is capped at 25 claims per document to guarantee fast interactive turnaround and avoid rate limits.
-- **Search Grounding Quota:** Live search verification requires a Google AI Studio API key with search grounding quota enabled (paid/tier 1+).
+- **Credit Conservation:** Search depth is set to `"basic"` by default, queries are deduplicated with an in-memory cache, and claims are limited to 1 Tavily call per claim.
 - **Session State Persistence:** Results and downloaded CSVs persist in `st.session_state` so interacting with filters or controls does not trigger expensive re-runs.
-
----
-
-## 30-Second Demo Video Checklist
-
-1. **Upload:** Drag & drop `sample_trap.pdf` into the PDF uploader.
-2. **Launch:** Click **"🚀 Run Fact-Check"**.
-3. **Extraction Progress:** Observe status expander reading pages and extracting claims.
-4. **Verification Progress:** Observe progress bar updating in real-time as workers verify claims.
-5. **Audit Results:**
-   - Point out summary metrics cards (Total, Verified, Inaccurate, False, Unverifiable).
-   - Filter by "Inaccurate & False (Flagged)".
-   - Expand a flagged claim card: highlight the original quote, the color-coded badge, the **Correct Real Fact**, and the clickable source links.
-6. **Export:** Click **"📥 Download Audit Report (CSV)"** to demonstrate full auditable export.
+- **Worker Concurrency:** Limited to 3 concurrent workers to respect free-tier rate limits for both Gemini and Tavily.
